@@ -5,11 +5,36 @@ module.exports = {
             return;
         }
     }
-
 }
 
-var findPath = function(posA, posB) {
+var findPath = function(creep, posA, posB) {
+    var unusedCarry = Math.floor(creep.store.getFreeCapacity(RESOURCE_ENERGY) / 50);
+    var weight = creep.body.length;
+    weight -= unusedCarry;
+    weight -= creep.getActiveBodyparts(MOVE);
+    var movemint = creep.getActiveBodyparts(MOVE) * 2;
 
+    //Roads: weight counts once. Plains: weight counts twice. Swamp: weight counts ten times.
+    var roadTicks = Math.ceil(weight / movemint);
+    var plainTicks = Math.ceil((2 * weight) / movemint);
+    var swampTicks = Math.ceil((10 * weight) / movemint);
+    
+    console.log("Road ticks: " + roadTicks);
+    console.log("Plain ticks: " + plainTicks);
+    console.log("Swamp ticks: " + swampTicks);
+    
+    
+    
+
+    var nextNodes = {};
+    nextNodes[Game.time] = posA;
+    
+    var expanded = new Set();
+
+    var time = Game.time;
+    return;
+    while(Object.keys(nextNodes).length > 0) {
+    }
 }
 
 var getWalkableNeighbours = function(pos) {
