@@ -6,7 +6,7 @@ module.exports.loop = function() {
     //roomPathfinder.computeWalkable("W8N4");
     
     if(Object.keys(Game.creeps).length < 1) { 
-        Game.spawns.Spawn1.spawnCreep([MOVE, WORK], Game.time, { memory: { role: "solo" }});
+        Game.spawns.Spawn1.spawnCreep([MOVE, WORK], Game.time, { memory: { role: "solo", path: [] }});
     }
     
     for(let name in Memory.creeps) {

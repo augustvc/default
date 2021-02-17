@@ -1,10 +1,21 @@
 module.exports = {
-    setPath: function(creep, posA, posB) {
+    setPath: function(creep, posA, posB, range) {
+        if(creep.fatigue > 0 || creep.spawning) {
+            return;
+        }
         if(posA.roomName != posB.roomName) {
             console.log("posA and posB rooms differ!");
             return;
         }
-        findPath(creep, posA, posB);
+        if(!creep.memory.path || creep.memory.path.length < 1) {
+            creep.say("CALC");
+            creep.memory.path = findPath(creep, posA, posB, range);
+            for(var pid in creep.memory.path) {
+                //TODO: SET NODE TO OCCUPIED (at the correct time)
+            }
+        } else {
+            creep.say("PATHFULL");
+        }
     },
 
     computeWalkable: function(roomName) {
@@ -27,7 +38,24 @@ module.exports = {
             if(Game.rooms[roomName].memory.occupied[tick]) {
                 delete Game.rooms[roomName].memory.occupied[tick];
             }
-            Game.rooms[roomName].memory.occupied[tick+300] = {};
+            Game.rooms[roomName].memory.occupied[tick+1500] = {};
+        }
+
+        for(let creepName in Game.creeps) {
+            var creep = Game.creeps[creepName];
+            if(creep.memory.path.length > 0) {
+                //TODO: ADD SOME CHECK TO SEE IF THE CREEP IS CURRENTLY IN THE RIGHT SPOT ON THE PATH
+                //AKA he didn't fail a move without knowing so!
+                if(Game.time == creep.memory.path[0][1]) {
+                    var mov = creep.memory.path.shift()[0];
+                    creep.move(mov);
+                }
+                else if(Game.time > creep.memory.path[0][1]) {
+                    console.log("removing path");
+                    creep.say("OOPS");
+                    creep.memory.path = [];
+                }
+            }
         }
     }
 }
@@ -37,14 +65,14 @@ var initialized = new Set();
 var initialize = function(roomName) {
     module.exports.computeWalkable(roomName);
     Game.rooms[roomName].memory.occupied = {};
-    for(var i = Game.time; i < Game.time + 300; i++) {
+    for(var i = Game.time; i < Game.time + 1500; i++) {
         Game.rooms[roomName].memory.occupied[i] = {};
     }
     
     initialized.add(roomName);
 }
 
-var findPath = function(creep, posA, posB) {
+var findPath = function(creep, posA, posB, range) {
     var roomName = posA.roomName;
     if(!initialized.has(roomName)) {
         initialize(roomName);
@@ -62,15 +90,16 @@ var findPath = function(creep, posA, posB) {
     var plainTicks = Math.ceil((2 * weight) / movemint);
     var swampTicks = Math.ceil((10 * weight) / movemint);
 
+    
     var relativeTime = 0;
+    var time = Game.time;
 
     var nextNodes = [];
     nextNodes[relativeTime] = [posA.x, posA.y];
     
     var expanded = {};
-
-    var time = Game.time;
-
+    expanded[posA.x+50*posA.y] = [posA.x + 50*posA.y, -1];
+        
     var maxTime = 300;
     for(var i = 1; i < maxTime; i++) {
         nextNodes[i] = [];
@@ -88,21 +117,29 @@ var findPath = function(creep, posA, posB) {
             var x = possiblePositions[i];
             var y = possiblePositions[i+1];
 
-            if(x == posB.x && y == posB.y) {
+            var rangeToGoal = Math.max(Math.abs(x - posB.x), Math.abs(y - posB.y));
+
+            if(rangeToGoal <= range) {
                 console.log("Found a path with duration: " + (time - Game.time));
-                console.log("Loops done: " + loopsDone);
                 
                 var reversePath = [];
-                var tile = posB.x + 50*posB.y;
+                var tile = x + 50*y;
                 var posAnr = posA.x + 50*posA.y;
                 while(tile != posAnr) {
                     reversePath.push(tile);
                     tile = expanded[tile][0];
                 }
-                for(var j = reversePath.length - 1; j >= 0; j--) {
-                    console.log("Step: " + reversePath[j]%50 + ", " + (Math.floor(reversePath[j]/50)));
+                reversePath.push(posAnr);
+
+                var steps = [];
+                for(var j = reversePath.length - 1; j >= 1; j--) {
+                    var dir = getStep(reversePath[j]%50, Math.floor(reversePath[j]/50),
+                    reversePath[j-1]%50, Math.floor(reversePath[j-1]/50));
+                    
+                    steps.push([dir, Game.time + expanded[reversePath[j-1]][1]]);
                 }
-                return;
+
+                return steps;
             }
 
             var neighbours = getWalkableNeighbours(x, y, roomName);
@@ -116,7 +153,7 @@ var findPath = function(creep, posA, posB) {
                 }
 
                 var occupied = false;
-                for(var tick = time + 1; tick <= time + ticks; tick++) {
+                for(var tick = time; tick < time + ticks; tick++) {
                     //Check if this neighbour is open at "tick". If not, set occupied to true and break this loop.
                     if(neighbour in Game.rooms[roomName].memory.occupied[tick]) {
                         occupied = true;
@@ -127,7 +164,9 @@ var findPath = function(creep, posA, posB) {
                     continue;
                 }
 
-                expanded[neighbour] = [x+50*y, relativeTime+ticks];
+                //Every node has as 2nd value in the array the ticknumber (which needs to be added to Game.time) at which 
+                //the creep is supposed to arrive there.
+                expanded[neighbour] = [x+50*y, relativeTime];
 
                 nextNodes[relativeTime + ticks].push(neighbours[j]);
                 nextNodes[relativeTime + ticks].push(neighbours[j+1]);
@@ -140,6 +179,34 @@ var findPath = function(creep, posA, posB) {
     }
 
     console.log("Couldn't find a path from " + String(posA) + " to " + String(posB));
+    return [];
+}
+
+var getStep = function(x1, y1, x2, y2) {
+    if(x2 < x1) {
+        //left
+        if(y2 < y1) {
+            return TOP_LEFT;
+        } else if(y2 == y1) {
+            return LEFT;
+        }
+        return BOTTOM_LEFT;
+    } else if(x2 == x1) {
+        //middle
+        if(y2 < y1) {
+            return TOP;
+        } else if(y2 == y1) {
+            return 0;
+        }
+        return BOTTOM;
+    }
+    //right    
+    if(y2 < y1) {
+        return TOP_RIGHT;
+    } else if(y2 == y1) {
+        return RIGHT;
+    }
+    return BOTTOM_RIGHT;
 }
 
 var getWalkableNeighbours = function(posx, posy, roomName) {
