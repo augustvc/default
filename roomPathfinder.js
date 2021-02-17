@@ -46,6 +46,14 @@ module.exports = {
             if(creep.memory.path.length > 0) {
                 //TODO: ADD SOME CHECK TO SEE IF THE CREEP IS CURRENTLY IN THE RIGHT SPOT ON THE PATH
                 //AKA he didn't fail a move without knowing so!
+                if(creep.pos.x + 50*creep.pos.y != creep.memory.path[0][2]) {
+                    creep.say("failed");
+                    console.log("Failed.. ");
+                    console.log("pos: " + creep.pos.x + 50*creep.pos.y);
+                    console.log("mempos: " + creep.memory.path[0][2]);
+                    creep.memory.path = [];
+                    continue;
+                }
                 if(Game.time == creep.memory.path[0][1]) {
                     var mov = creep.memory.path.shift()[0];
                     creep.move(mov);
@@ -94,9 +102,18 @@ var findPath = function(creep, posA, posB, range) {
     var relativeTime = 0;
     var time = Game.time;
 
+    /*Nextnodes is an array containing many arrays. One array per tick, so that we can
+    expand nodes ordered on which tick we can get there. It has the x, y positions of each
+    tile that can be reached, stored within the corresponding tick's array.*/
     var nextNodes = [];
     nextNodes[relativeTime] = [posA.x, posA.y];
     
+    //TODO: Right now we pretend everything costs 1, so it is impossible to find slower paths
+    //But I wonder if it is possible with different costs to get suboptimal results if just finding a node blocks
+    //it from being found by other tiles. Maybe if the added cost of visiting that node from a neighbour is considered to be
+    //equal to the terrain cost on itself, rather than the neighbour's terrain cost, it would all be OK?
+    //If that is so, all we'd need to worry about is not immediately finish once we get in range of the goal position. Because the last step may be overpriced!
+
     var expanded = {};
     expanded[posA.x+50*posA.y] = [posA.x + 50*posA.y, -1];
         
@@ -136,7 +153,10 @@ var findPath = function(creep, posA, posB, range) {
                     var dir = getStep(reversePath[j]%50, Math.floor(reversePath[j]/50),
                     reversePath[j-1]%50, Math.floor(reversePath[j-1]/50));
                     
-                    steps.push([dir, Game.time + expanded[reversePath[j-1]][1]]);
+                    /*Dir is the direction that you'd move in when going from j to j-1.
+                    We also add j's location to the steps so that we can check if the creep is in the correct position
+                    whenever it tries to set a step.*/
+                    steps.push([dir, Game.time + expanded[reversePath[j-1]][1], reversePath[j]]);
                 }
 
                 return steps;
