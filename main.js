@@ -8,10 +8,12 @@ module.exports.loop = function() {
     
     if(Object.keys(Game.creeps).length < 1) { 
         Game.spawns.Spawn1.spawnCreep([MOVE, WORK], Game.time, { memory: { role: "solo", path: [] }});
+        roomPathfinder.processMovementCosts(Game.time);
     }
 
     if(false) {
         Game.spawns.Spawn1.spawnCreep([MOVE], "debug", { memory: { role: "debug", path: []}});
+        roomPathfinder.processMovementCosts("debug");
     }
     
     for(let name in Memory.creeps) {

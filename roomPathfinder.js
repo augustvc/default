@@ -17,6 +17,7 @@ module.exports = {
                 for(var tick = path[pid][1]; tick < path[pid+1][1]; tick++) {
                     Game.rooms[roomName].memory.occupied[tick][path[pid+1][2]] = null;
                 }
+                console.log("tile: " + path[pid]);
             }
         } else {
             creep.say("alreadypath");
@@ -35,6 +36,11 @@ module.exports = {
         }
     },
 
+    abortPath: function(creep) {
+        removePath(creep.memory.path, creep.room.name);
+        creep.memory.path = [];
+    },
+
     tick: function(tick) {
         //TODO: If a creep has no path for some reason, but the spot he is standing in is reserved for the current tick
         //move off the tile, to a non-reserved tile, to make space for other creeps.
@@ -48,47 +54,90 @@ module.exports = {
             }
             Game.rooms[roomName].memory.occupied[tick+300] = {};
         }
-
-        for(let creepName in Game.creeps) {
+        
+        for(var creepName in Game.creeps) {
             var creep = Game.creeps[creepName];
             if(creep.memory.path.length > 1) {
                 if(creep.pos.x + 50*creep.pos.y != creep.memory.path[0][2]) {
                     creep.say("failed");
-                    console.log("Failed.. ");
-                    console.log("pos: " + creep.pos.x + 50*creep.pos.y);
-                    console.log("mempos: " + creep.memory.path[0][2]);
-                    removePath(creep.memory.path);
+                    console.log(creep.name + " failed.. ");
+                    removePath(creep.memory.path, creep.room.name);
                     creep.memory.path = [];
                     continue;
                 }
                 if(Game.time == creep.memory.path[0][1]) {
                     var mov = creep.memory.path.shift()[0];
                     creep.move(mov);
+                    creep.say("yay");
                 }
                 else if(Game.time > creep.memory.path[0][1]) {
-                    console.log("removing path");
                     creep.say("OOPS");
-                    removePath(creep.memory.path);
+                    removePath(creep.memory.path, creep.room.name);
                     creep.memory.path = [];
                 }
-            } else {
+            } else if(creep.memory.path.length < 1) {
                 var roomName = creep.room.name;
-                if(Game.rooms[roomName].memory.occupied[Game.time][creep.pos.x + 50*creep.pos.y]) {
-                    creep.say("IMBLOCK!");
-                    return;
+                if((creep.pos.x + 50*creep.pos.y) in Game.rooms[roomName].memory.occupied[Game.time]) {
+                    creep.say("unblock");
+                    if(creep.fatigue == 0) {
+                        var neighbours = getWalkableNeighbours(creep.pos.x, creep.pos.y, creep.pos.roomName);
+                        for(var i = 0; i < neighbours.length; i+=3) {
+                            var nbx = neighbours[i];
+                            var nby = neighbours[i+1];
+                            var nbc = neighbours[i + 2];
+
+                            var duration = creep.memory.roadTicks;
+                            if(nbc == 2) {
+                                duration = creep.memory.plainTicks;
+                            } else if(nbc == 3) {
+                                duration = creep.memory.swampTicks;
+                            }
+                            var open = true;
+                            for(var time = Game.time; time < Game.time + duration; time++) {
+                                if((nbx + 50*nby) in Game.rooms[roomName].memory.occupied[time]) {
+                                    open = false;
+                                }
+                            }
+                            if(open) {
+                                creep.move(getStep(creep.pos.x, creep.pos.y, nbx, nby));
+                                break;
+                            }
+                        }
+                    }
+                    continue;
                 }
-                //TODO: read above text
             }
         }
+    },
+
+    processMovementCosts: function(creepName) {
+        if(!Game.creeps[creepName]) {
+            return;
+        }
+        var creep = Game.creeps[creepName];
+        //Todo: Problems are boosted parts aren't processed, and creep.body.length may not be the base weight because of dead parts.
+        var unusedCarry = Math.floor(creep.store.getFreeCapacity(RESOURCE_ENERGY) / 50);
+        var weight = creep.body.length;
+        weight -= unusedCarry;
+        weight -= creep.getActiveBodyparts(MOVE);
+        var movemint = creep.getActiveBodyparts(MOVE) * 2;
+
+        //Roads: weight counts once. Plains: weight counts twice. Swamp: weight counts ten times.
+        creep.memory.roadTicks = Math.max(1, Math.ceil(weight / movemint));
+        creep.memory.plainTicks = Math.max(1, Math.ceil((2 * weight) / movemint));
+        creep.memory.swampTicks = Math.max(1, Math.ceil((10 * weight) / movemint));
     }
 }
 
-var removePath = function(path) {
-    return;
-    //TODO: Implement this.
-    for(var pid = 0; pid < creep.memory.path.length - 1; pid++) {
+var removePath = function(path, roomName) {
+    console.log("removing path");
+    for(var pid = 0; pid < path.length - 1; pid++) {
         for(var tick = path[pid][1]; tick < path[pid+1][1]; tick++) {
-            delete(Game.rooms[roomName].memory.occupied[tick][path[pid+1][2]]);
+            if(tick >= Game.time) {
+                if(Game.rooms[roomName].memory.occupied[tick][path[pid+1][2]]) {
+                    delete(Game.rooms[roomName].memory.occupied[tick][path[pid+1][2]]);
+                }
+            }
         }
     }
 }
@@ -97,11 +146,17 @@ var initialized = new Set();
 
 var initialize = function(roomName) {
     module.exports.computeWalkable(roomName);
-    Game.rooms[roomName].memory.occupied = {};
+    var room = Game.rooms[roomName];
+    room.memory.occupied = {};
     for(var i = Game.time; i < Game.time + 300; i++) {
-        Game.rooms[roomName].memory.occupied[i] = {};
+        room.memory.occupied[i] = {};
     }
     
+    var creeps = room.find(FIND_MY_CREEPS);
+    for(var creepName in creeps) {
+        creeps[creepName].memory.path = [];
+    }
+
     initialized.add(roomName);
 }
 
@@ -115,17 +170,10 @@ var findPath = function(creep, posA, posB, range) {
         initialize(roomName);
     }
 
-    //Todo: Problems are boosted parts aren't processed, and creep.body.length may not be the base weight because of dead parts.
-    var unusedCarry = Math.floor(creep.store.getFreeCapacity(RESOURCE_ENERGY) / 50);
-    var weight = creep.body.length;
-    weight -= unusedCarry;
-    weight -= creep.getActiveBodyparts(MOVE);
-    var movemint = creep.getActiveBodyparts(MOVE) * 2;
-
     //Roads: weight counts once. Plains: weight counts twice. Swamp: weight counts ten times.
-    var roadTicks = Math.max(1, Math.ceil(weight / movemint));
-    var plainTicks = Math.max(1, Math.ceil((2 * weight) / movemint));
-    var swampTicks = Math.max(1, Math.ceil((10 * weight) / movemint));
+    var roadTicks = creep.memory.roadTicks;
+    var plainTicks = creep.memory.plainTicks;
+    var swampTicks = creep.memory.swampTicks;
     
     var relativeTime = 0;
     var time = Game.time;
@@ -134,8 +182,7 @@ var findPath = function(creep, posA, posB, range) {
     expand nodes ordered on which tick we can get there. It has the x, y positions of each
     tile that can be reached, stored within the corresponding tick's array.*/
     var nextNodes = [];
-    nextNodes[relativeTime] = [posA.x, posA.y];
-    
+    nextNodes[relativeTime] = [posA.x, posA.y];    
     
     var expanded = {};
     expanded[posA.x+50*posA.y] = [posA.x + 50*posA.y, -1];
@@ -150,7 +197,11 @@ var findPath = function(creep, posA, posB, range) {
     var goalX = posB.x;
     var goalY = posB.y;
 
-    while(Object.keys(nextNodes).length > 0 && (time - Game.time) < maxTime) {
+    //TODO: ensure that a path can still be found if the goal node is occupied at the time of potential arrival.
+    //the easiest method to probably do this is if any node is occupied when the creep would expand there,
+    // just see at what time that node is free, and if it is possible to schedule standing still and waiting until it is free.
+
+    while(Object.keys(nextNodes).length > 0 && ((time - Game.time) < (maxTime - creep.memory.swampTicks))) {
         var possiblePositions = nextNodes[relativeTime];
 
         for(var i = 0; i < possiblePositions.length; i+=2) {
@@ -183,8 +234,8 @@ var findPath = function(creep, posA, posB, range) {
                     whenever it tries to set a step.*/
                     steps.push([dir, Game.time + expanded[reversePath[j-1]][1], reversePath[j]]);
                 }
-                steps.push([0, (time - Game.time), x + 50*y]);
-                console.log("Found a path with duration: " + (time - Game.time) + " after " + loopsDone + " loops.");
+                steps.push([0, time, x + 50*y]);
+                console.log("Found a path to " + x + ", " + y + " with duration: " + (time - Game.time) + " after " + loopsDone + " loops.");
 
                 return steps;
             }
