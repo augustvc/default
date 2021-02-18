@@ -1,5 +1,6 @@
 module.exports = {
-    setPath: function(creep, posA, posB, range) {
+    setPath: function(creep, posB, range) {
+        var posA = creep.pos;
         if(creep.fatigue > 0 || creep.spawning) {
             return;
         }
@@ -7,14 +8,18 @@ module.exports = {
             console.log("posA and posB rooms differ!");
             return;
         }
-        if(!creep.memory.path || creep.memory.path.length < 1) {
+        if(!creep.memory.path || creep.memory.path.length < 2) {
             creep.say("CALC");
             creep.memory.path = findPath(creep, posA, posB, range);
-            for(var pid in creep.memory.path) {
-                //TODO: SET NODE TO OCCUPIED (at the correct time)
+            var path = creep.memory.path;
+            var roomName = posB.roomName;
+            for(var pid = 0; pid < creep.memory.path.length - 1; pid++) {
+                for(var tick = path[pid][1]; tick < path[pid+1][1]; tick++) {
+                    Game.rooms[roomName].memory.occupied[tick][path[pid+1][2]] = null;
+                }
             }
         } else {
-            creep.say("PATHFULL");
+            creep.say("alreadypath");
         }
     },
 
@@ -25,32 +30,34 @@ module.exports = {
         }
         for(var x = 0; x < 50; x++) {
             for(var y = 0; y < 50; y++) {
-                setWalkable(x, y, roomName);
+                setWalkCosts(x, y, roomName);
             }
         }
     },
 
     tick: function(tick) {
+        //TODO: If a creep has no path for some reason, but the spot he is standing in is reserved for the current tick
+        //move off the tile, to a non-reserved tile, to make space for other creeps.
+
         for(let roomName in Game.rooms) {
             if(!initialized.has(roomName)) {
                 initialize(roomName);
             }
-            if(Game.rooms[roomName].memory.occupied[tick]) {
-                delete Game.rooms[roomName].memory.occupied[tick];
+            if(Game.rooms[roomName].memory.occupied[tick-1]) {
+                delete Game.rooms[roomName].memory.occupied[tick-1];
             }
-            Game.rooms[roomName].memory.occupied[tick+1500] = {};
+            Game.rooms[roomName].memory.occupied[tick+300] = {};
         }
 
         for(let creepName in Game.creeps) {
             var creep = Game.creeps[creepName];
-            if(creep.memory.path.length > 0) {
-                //TODO: ADD SOME CHECK TO SEE IF THE CREEP IS CURRENTLY IN THE RIGHT SPOT ON THE PATH
-                //AKA he didn't fail a move without knowing so!
+            if(creep.memory.path.length > 1) {
                 if(creep.pos.x + 50*creep.pos.y != creep.memory.path[0][2]) {
                     creep.say("failed");
                     console.log("Failed.. ");
                     console.log("pos: " + creep.pos.x + 50*creep.pos.y);
                     console.log("mempos: " + creep.memory.path[0][2]);
+                    removePath(creep.memory.path);
                     creep.memory.path = [];
                     continue;
                 }
@@ -61,9 +68,27 @@ module.exports = {
                 else if(Game.time > creep.memory.path[0][1]) {
                     console.log("removing path");
                     creep.say("OOPS");
+                    removePath(creep.memory.path);
                     creep.memory.path = [];
                 }
+            } else {
+                var roomName = creep.room.name;
+                if(Game.rooms[roomName].memory.occupied[Game.time][creep.pos.x + 50*creep.pos.y]) {
+                    creep.say("IMBLOCK!");
+                    return;
+                }
+                //TODO: read above text
             }
+        }
+    }
+}
+
+var removePath = function(path) {
+    return;
+    //TODO: Implement this.
+    for(var pid = 0; pid < creep.memory.path.length - 1; pid++) {
+        for(var tick = path[pid][1]; tick < path[pid+1][1]; tick++) {
+            delete(Game.rooms[roomName].memory.occupied[tick][path[pid+1][2]]);
         }
     }
 }
@@ -73,7 +98,7 @@ var initialized = new Set();
 var initialize = function(roomName) {
     module.exports.computeWalkable(roomName);
     Game.rooms[roomName].memory.occupied = {};
-    for(var i = Game.time; i < Game.time + 1500; i++) {
+    for(var i = Game.time; i < Game.time + 300; i++) {
         Game.rooms[roomName].memory.occupied[i] = {};
     }
     
@@ -81,6 +106,10 @@ var initialize = function(roomName) {
 }
 
 var findPath = function(creep, posA, posB, range) {
+    if(Math.max(Math.abs(posA.x - posB.x), Math.abs(posA.y - posB.y)) <= range) {
+        return [];
+    }
+
     var roomName = posA.roomName;
     if(!initialized.has(roomName)) {
         initialize(roomName);
@@ -94,10 +123,9 @@ var findPath = function(creep, posA, posB, range) {
     var movemint = creep.getActiveBodyparts(MOVE) * 2;
 
     //Roads: weight counts once. Plains: weight counts twice. Swamp: weight counts ten times.
-    var roadTicks = Math.ceil(weight / movemint);
-    var plainTicks = Math.ceil((2 * weight) / movemint);
-    var swampTicks = Math.ceil((10 * weight) / movemint);
-
+    var roadTicks = Math.max(1, Math.ceil(weight / movemint));
+    var plainTicks = Math.max(1, Math.ceil((2 * weight) / movemint));
+    var swampTicks = Math.max(1, Math.ceil((10 * weight) / movemint));
     
     var relativeTime = 0;
     var time = Game.time;
@@ -108,12 +136,7 @@ var findPath = function(creep, posA, posB, range) {
     var nextNodes = [];
     nextNodes[relativeTime] = [posA.x, posA.y];
     
-    //TODO: Right now we pretend everything costs 1, so it is impossible to find slower paths
-    //But I wonder if it is possible with different costs to get suboptimal results if just finding a node blocks
-    //it from being found by other tiles. Maybe if the added cost of visiting that node from a neighbour is considered to be
-    //equal to the terrain cost on itself, rather than the neighbour's terrain cost, it would all be OK?
-    //If that is so, all we'd need to worry about is not immediately finish once we get in range of the goal position. Because the last step may be overpriced!
-
+    
     var expanded = {};
     expanded[posA.x+50*posA.y] = [posA.x + 50*posA.y, -1];
         
@@ -135,10 +158,12 @@ var findPath = function(creep, posA, posB, range) {
             var y = possiblePositions[i+1];
 
             var rangeToGoal = Math.max(Math.abs(x - posB.x), Math.abs(y - posB.y));
+            if(x == 10 && y == 8) {
+                console.log(rangeToGoal);
+                console.log(range);
+            }
 
             if(rangeToGoal <= range) {
-                console.log("Found a path with duration: " + (time - Game.time));
-                
                 var reversePath = [];
                 var tile = x + 50*y;
                 var posAnr = posA.x + 50*posA.y;
@@ -158,15 +183,23 @@ var findPath = function(creep, posA, posB, range) {
                     whenever it tries to set a step.*/
                     steps.push([dir, Game.time + expanded[reversePath[j-1]][1], reversePath[j]]);
                 }
+                steps.push([0, (time - Game.time), x + 50*y]);
+                console.log("Found a path with duration: " + (time - Game.time) + " after " + loopsDone + " loops.");
 
                 return steps;
             }
 
             var neighbours = getWalkableNeighbours(x, y, roomName);
-            for(var j = 0; j < neighbours.length; j+=2) {
+            for(var j = 0; j < neighbours.length; j+=3) {
                 loopsDone++;
-                var ticks = 1; //Todo: Adapt this based on what terrain the creep would have to walk on.
 
+                var ticks = roadTicks;
+                if(neighbours[j+2] == 2) {
+                    ticks = plainTicks;
+                } else if(neighbours[j + 2] == 3) {
+                    ticks = swampTicks;
+                }
+                
                 var neighbour = neighbours[j] + 50*neighbours[j+1];
                 if(neighbour in expanded && (relativeTime + ticks >= expanded[neighbour][1])) {
                     continue;
@@ -198,7 +231,7 @@ var findPath = function(creep, posA, posB, range) {
         relativeTime++;
     }
 
-    console.log("Couldn't find a path from " + String(posA) + " to " + String(posB));
+    console.log("Couldn't find a path from " + String(posA) + " to " + String(posB) + " after " + loopsDone + " loops.");
     return [];
 }
 
@@ -237,27 +270,34 @@ var getWalkableNeighbours = function(posx, posy, roomName) {
             if(x == posx && y == posy) {
                 continue;
             }
-            if(isWalkable(x, y, roomName)) {
+            var cost = getWalkCost(x, y, roomName);
+            if(cost != 0) {
                 neighbours.push(x);
                 neighbours.push(y);
+                neighbours.push(cost);
             }
         }
     }
     return neighbours;
 }
 
-var isWalkable = function(x, y, roomName) {
+var getWalkCost = function(x, y, roomName) {
     return Game.rooms[roomName].memory[x+50*y];
 }
 
-var setWalkable = function(x, y, roomName) {
+var setWalkCosts = function(x, y, roomName) {
     var objects = new RoomPosition(x, y, roomName).look();
     var walkable = true;
     var road = false;
+    var swamp = false;
     for(var i = 0; i < objects.length; i++) {
         var object = objects[i];
-        if(object.type == "terrain" && object.terrain == "wall") {
-            walkable = false;
+        if(object.type == "terrain") {
+            if(object.terrain == "wall") {
+                walkable = false;
+            } else if(object.terrain == "swamp") {
+                swamp = true;
+            }
         }
         else if(object.type == "structure") {
             switch(object.structure.structureType) {
@@ -267,11 +307,21 @@ var setWalkable = function(x, y, roomName) {
                 case STRUCTURE_RAMPART:
                     break;
                 default:
-                    return false;
+                    Game.rooms[roomName].memory[x+50*y] = 0;
+                    return;
             }
         }
     }
     var outOfBounds = x < 1 || x >= 49 || y < 1 || y >= 49;
-    var result = (!outOfBounds) && (walkable || road);
+    var result = 0; // 0 is unwalkable
+    if ((!outOfBounds) && (walkable || road)) {
+        if(road) {
+            result = 1; // 1 = road
+        } else if(swamp) {
+            result = 3; // 3 = swamp
+        } else {
+            result = 2; // 2 = plains
+        }
+    }
     Game.rooms[roomName].memory[x+50*y] = result;
 }
