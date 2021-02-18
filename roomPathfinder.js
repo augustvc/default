@@ -1,5 +1,11 @@
 module.exports = {
     setPath: function(creep, posB, range) {
+        /*TODO:
+        possibly change this function's name to setDestination, with a range. Enter the destination in the creep's memory.
+        And we automatically check if the destination differs from the current destination.
+        We also check in the tick function whether we are in range of our destination.
+        And when setting a destination, check if the path we already have is already going there, if so, don't change the path.
+        */
         var posA = creep.pos;
         if(creep.fatigue > 0 || creep.spawning) {
             return;
@@ -42,9 +48,6 @@ module.exports = {
     },
 
     tick: function(tick) {
-        //TODO: If a creep has no path for some reason, but the spot he is standing in is reserved for the current tick
-        //move off the tile, to a non-reserved tile, to make space for other creeps.
-
         for(let roomName in Game.rooms) {
             if(!initialized.has(roomName)) {
                 initialize(roomName);
@@ -235,7 +238,7 @@ var findPath = function(creep, posA, posB, range) {
                     steps.push([dir, Game.time + expanded[reversePath[j-1]][1], reversePath[j]]);
                 }
                 steps.push([0, time, x + 50*y]);
-                console.log("Found a path to " + x + ", " + y + " with duration: " + (time - Game.time) + " after " + loopsDone + " loops.");
+                console.log("Found a path to " + x + ", " + y + " with duration: " + (time - Game.time) + " after " + loopsDone + " loops. room: " + roomName);
 
                 return steps;
             }
@@ -360,6 +363,18 @@ var setWalkCosts = function(x, y, roomName) {
                 default:
                     Game.rooms[roomName].memory[x+50*y] = 0;
                     return;
+            }
+        } else if(object.type == "constructionSite") {
+            console.log(object);
+            switch(object.constructionSite.structureType) {
+                case STRUCTURE_ROAD:
+                    break;
+                case STRUCTURE_RAMPART:
+                    break;
+                case STRUCTURE_CONTAINER:
+                    break;
+                default:
+                    return 0;
             }
         }
     }
