@@ -11,19 +11,22 @@ module.exports = {
             return;
         }
         if(posA.roomName != posB.roomName) {
-            console.log("posA and posB rooms differ!");
+            console.log("posA and posB rooms differ! Creep: " + creep.name);
             return;
         }
         if(!creep.memory.path || creep.memory.path.length < 2) {
             creep.say("CALC");
             creep.memory.path = findPath(creep, posA, posB, range);
+            if(creep.memory.path.length < 2) {
+                console.log("Path too short for creep " + creep + " to point " + posB);
+                creep.memory.path = [];
+            }
             var path = creep.memory.path;
             var roomName = posB.roomName;
             for(var pid = 0; pid < creep.memory.path.length - 1; pid++) {
                 for(var tick = path[pid][1]; tick < path[pid+1][1]; tick++) {
                     Game.rooms[roomName].memory.occupied[tick][path[pid+1][2]] = null;
                 }
-                console.log("tile: " + path[pid]);
             }
         } else {
             creep.say("alreadypath");
@@ -52,10 +55,16 @@ module.exports = {
             if(!initialized.has(roomName)) {
                 initialize(roomName);
             }
-            if(Game.rooms[roomName].memory.occupied[tick-1]) {
+            if((tick-1) in Game.rooms[roomName].memory.occupied) {
                 delete Game.rooms[roomName].memory.occupied[tick-1];
             }
             Game.rooms[roomName].memory.occupied[tick+300] = {};
+            for(var i = tick; i < tick + 300; i++) {
+                if(!i in Game.rooms[roomName].memory.occupied) {
+                    console.log("Whoops... The tick in " + i + " ticks isn't in the occupied list for room " + roomName);
+                    Game.rooms[roomName].memory.occupied[i] = {};
+                }
+            }
         }
         
         for(var creepName in Game.creeps) {
@@ -79,6 +88,7 @@ module.exports = {
                     creep.memory.path = [];
                 }
             } else if(creep.memory.path.length < 1) {
+                this.processMovementCosts(creepName);
                 var roomName = creep.room.name;
                 if((creep.pos.x + 50*creep.pos.y) in Game.rooms[roomName].memory.occupied[Game.time]) {
                     creep.say("unblock");
@@ -133,7 +143,7 @@ module.exports = {
 }
 
 var removePath = function(path, roomName) {
-    console.log("removing path");
+    //console.log("removing path");
     for(var pid = 0; pid < path.length - 1; pid++) {
         for(var tick = path[pid][1]; tick < path[pid+1][1]; tick++) {
             if(tick >= Game.time) {
@@ -172,6 +182,7 @@ var findPath = function(creep, posA, posB, range) {
     if(!initialized.has(roomName)) {
         initialize(roomName);
     }
+    module.exports.processMovementCosts(creep.name);
 
     //Roads: weight counts once. Plains: weight counts twice. Swamp: weight counts ten times.
     var roadTicks = creep.memory.roadTicks;
@@ -190,7 +201,7 @@ var findPath = function(creep, posA, posB, range) {
     var expanded = {};
     expanded[posA.x+50*posA.y] = [posA.x + 50*posA.y, -1];
         
-    var maxTime = 300;
+    var maxTime = 299;
     for(var i = 1; i < maxTime; i++) {
         nextNodes[i] = [];
     }
@@ -212,10 +223,6 @@ var findPath = function(creep, posA, posB, range) {
             var y = possiblePositions[i+1];
 
             var rangeToGoal = Math.max(Math.abs(x - posB.x), Math.abs(y - posB.y));
-            if(x == 10 && y == 8) {
-                console.log(rangeToGoal);
-                console.log(range);
-            }
 
             if(rangeToGoal <= range) {
                 var reversePath = [];
@@ -238,7 +245,7 @@ var findPath = function(creep, posA, posB, range) {
                     steps.push([dir, Game.time + expanded[reversePath[j-1]][1], reversePath[j]]);
                 }
                 steps.push([0, time, x + 50*y]);
-                console.log("Found a path to " + x + ", " + y + " with duration: " + (time - Game.time) + " after " + loopsDone + " loops. room: " + roomName);
+                //console.log("Found a path to " + x + ", " + y + " with duration: " + (time - Game.time) + " after " + loopsDone + " loops room: " + roomName);
 
                 return steps;
             }
@@ -255,12 +262,26 @@ var findPath = function(creep, posA, posB, range) {
                 }
                 
                 var neighbour = neighbours[j] + 50*neighbours[j+1];
-                if(neighbour in expanded && (relativeTime + ticks >= expanded[neighbour][1])) {
-                    continue;
+                if(neighbour in expanded) {
+                    if(relativeTime + ticks >= expanded[neighbour][1]) {
+                        continue;
+                    } else {
+                        console.log("no con");
+                    }
                 }
 
                 var occupied = false;
                 for(var tick = time; tick < time + ticks; tick++) {
+                    if(!occupied in Game.rooms[roomName].memory) {
+                        console.log("Room " + roomName + " doesn't have occupied??? WTF");
+                        occupied = true;
+                        break;
+                    }
+                    if(!tick in Game.rooms[roomName].memory.occupied) {
+                        console.log("ERROR: Tick: " + tick + " isn't in occupied for room " + roomName);
+                        occupied = true;
+                        break;
+                    }
                     //Check if this neighbour is open at "tick". If not, set occupied to true and break this loop.
                     if(neighbour in Game.rooms[roomName].memory.occupied[tick]) {
                         occupied = true;
@@ -365,7 +386,6 @@ var setWalkCosts = function(x, y, roomName) {
                     return;
             }
         } else if(object.type == "constructionSite") {
-            console.log(object);
             switch(object.constructionSite.structureType) {
                 case STRUCTURE_ROAD:
                     break;
@@ -374,6 +394,7 @@ var setWalkCosts = function(x, y, roomName) {
                 case STRUCTURE_CONTAINER:
                     break;
                 default:
+                    Game.rooms[roomName].memory[x+50*y] = 0;
                     return 0;
             }
         }
